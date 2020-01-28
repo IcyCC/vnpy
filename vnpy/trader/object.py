@@ -232,7 +232,11 @@ class ContractData(BaseData):
     exchange: Exchange
     name: str
     product: Product
-    size: int
+    size: int # 倍率
+    rate: float # 手续费
+
+    inverse: bool
+    
     pricetick: float
 
     min_volume: float = 1           # minimum trading volume of the contract
