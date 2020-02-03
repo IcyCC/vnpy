@@ -2,6 +2,9 @@ from vnpy.app.cta_strategy.backtesting import *
 from typing import List, Dict,Callable
 from .template import WhMultiSingalStrategy
 from .base import MultiDailyResult
+from vnpy.trader.constant import (Direction, Offset, Exchange,
+                                  Interval, Status)
+from vnpy.trader.object import BarData, TickData, OrderData, TradeData, ContractData
 
 class WhBacktestingEngine(object):
 
@@ -12,6 +15,7 @@ class WhBacktestingEngine(object):
         """"""
 
         self.vt_symbols : List[str] = []
+        self.contracts: Dict[str,ContractData] = {}
 
         self.bars[str, BarData] = {}
         self.ticks[str, TickData] = {}
@@ -497,13 +501,13 @@ class WhBacktestingEngine(object):
         for order in list(self.active_limit_orders.values()):
 
             if self.mode == BacktestingMode.BAR:
-                long_cross_price = self.bar.low_price
-                short_cross_price = self.bar.high_price
-                long_best_price = self.bar.open_price
-                short_best_price = self.bar.open_price
+                long_cross_price = self.bars[order.vt_symbol].low_price
+                short_cross_price = self.bars[order.vt_symbol].high_price
+                long_best_price = self.bars[order.vt_symbol].open_price
+                short_best_price = self.bars[order.vt_symbol].open_price
             else:
-                long_cross_price = self.tick.ask_price_1
-                short_cross_price = self.tick.bid_price_1
+                long_cross_price = self.ticks[order.vt_symbol].ask_price_1
+                short_cross_price = self.ticks[order.vt_symbol].bid_price_1
                 long_best_price = long_cross_price
                 short_best_price = short_cross_price
             # Push order update with status "not traded" (pending).
@@ -558,7 +562,285 @@ class WhBacktestingEngine(object):
             )
             trade.datetime = self.datetime
 
-            self.strategy.pos += pos_change
+            self.strategy.poses[order.vt_symbol] += pos_change
             self.strategy.on_trade(trade)
 
             self.trades[trade.vt_tradeid] = trade
+
+    def cross_stop_order(self):
+        """
+        Cross stop order with last bar/tick data.
+        """
+
+        for stop_order in list(self.active_stop_orders.values()):
+            
+            if self.mode == BacktestingMode.BAR:
+                long_cross_price = self.bars[order.vt_symbol].low_price
+                short_cross_price = self.bars[order.vt_symbol].high_price
+                long_best_price = self.bars[order.vt_symbol].open_price
+                short_best_price = self.bars[order.vt_symbol].open_price
+            else:
+                long_cross_price = self.ticks[order.vt_symbol].ask_price_1
+                short_cross_price = self.ticks[order.vt_symbol].bid_price_1
+                long_best_price = long_cross_price
+                short_best_price = short_cross_price
+            # Check whether stop order can be triggered.
+            long_cross = (
+                stop_order.direction == Direction.LONG
+                and stop_order.price <= long_cross_price
+            )
+
+            short_cross = (
+                stop_order.direction == Direction.SHORT
+                and stop_order.price >= short_cross_price
+            )
+
+            if not long_cross and not short_cross:
+                continue
+
+            # Create order data.
+            self.limit_order_count += 1
+
+            order = OrderData(
+                symbol=self.symbol,
+                exchange=self.exchange,
+                orderid=str(self.limit_order_count),
+                direction=stop_order.direction,
+                offset=stop_order.offset,
+                price=stop_order.price,
+                volume=stop_order.volume,
+                status=Status.ALLTRADED,
+                gateway_name=self.gateway_name,
+            )
+            order.datetime = self.datetime
+ 
+            self.limit_orders[order.vt_orderid] = order
+
+            # Create trade data.
+            if long_cross:
+                trade_price = max(stop_order.price, long_best_price)
+                pos_change = order.volume
+            else:
+                trade_price = min(stop_order.price, short_best_price)
+                pos_change = -order.volume
+
+            self.trade_count += 1
+
+            trade = TradeData(
+                symbol=order.symbol,
+                exchange=order.exchange,
+                orderid=order.orderid,
+                tradeid=str(self.trade_count),
+                direction=order.direction,
+                offset=order.offset,
+                price=trade_price,
+                volume=order.volume,
+                time=self.datetime.strftime("%H:%M:%S"),
+                gateway_name=self.gateway_name,
+            )
+            trade.datetime = self.datetime
+
+            self.trades[trade.vt_tradeid] = trade
+
+            # Update stop order.
+            stop_order.vt_orderids.append(order.vt_orderid)
+            stop_order.status = StopOrderStatus.TRIGGERED
+
+            if stop_order.stop_orderid in self.active_stop_orders:
+                self.active_stop_orders.pop(stop_order.stop_orderid)
+
+            # Push update to strategy.
+            self.strategy.on_stop_order(stop_order)
+            self.strategy.on_order(order)
+
+            self.strategy.poser[order.vt_symbol] += pos_change
+            self.strategy.on_trade(trade)
+
+    
+
+    def load_bar(
+        self,
+        vt_symbol: str,
+        days: int,
+        interval: Interval,
+        callback: Callable,
+        use_database: bool
+    ):
+        """"""
+        self.days = days
+        self.callback = callback
+
+    def load_tick(self, vt_symbol: str, days: int, callback: Callable):
+        """"""
+        self.days = days
+        self.callback = callback
+
+
+    def send_order(
+        self,
+        vt_symbol: str,
+        direction: Direction,
+        offset: Offset,
+        price: float,
+        volume: float,
+        stop: bool,
+        lock: bool
+    ):
+        """"""
+        price = round_to(price, self.pricetick)
+        if stop:
+            vt_orderid = self.send_stop_order(vt_symbol, direction, offset, price, volume)
+        else:
+            vt_orderid = self.send_limit_order(vt_symbol, direction, offset, price, volume)
+        return [vt_orderid]
+
+    def send_stop_order(
+        self,
+        vt_symbol: str,
+        direction: Direction,
+        offset: Offset,
+        price: float,
+        volume: float
+    ):
+        """"""
+        self.stop_order_count += 1
+
+        stop_order = StopOrder(
+            vt_symbol=vt_symbol,
+            direction=direction,
+            offset=offset,
+            price=price,
+            volume=volume,
+            stop_orderid=f"{STOPORDER_PREFIX}.{self.stop_order_count}",
+            strategy_name=self.strategy.strategy_name,
+        )
+
+        self.active_stop_orders[stop_order.stop_orderid] = stop_order
+        self.stop_orders[stop_order.stop_orderid] = stop_order
+
+        return stop_order.stop_orderid
+
+    def send_limit_order(
+        self,
+        vt_symbol: str,
+        direction: Direction,
+        offset: Offset,
+        price: float,
+        volume: float
+    ):
+        """"""
+        self.limit_order_count += 1
+
+        order = OrderData(
+            symbol=vt_symbol,
+            exchange=self.contracts[vt_symbol].exchange,
+            orderid=str(self.limit_order_count),
+            direction=direction,
+            offset=offset,
+            price=price,
+            volume=volume,
+            status=Status.SUBMITTING,
+            gateway_name=self.gateway_name,
+        )
+        order.datetime = self.datetime
+
+        self.active_limit_orders[order.vt_orderid] = order
+        self.limit_orders[order.vt_orderid] = order
+
+        return order.vt_orderid
+
+    def cancel_order(self, vt_orderid: str):
+        """
+        Cancel order by vt_orderid.
+        """
+        if vt_orderid.startswith(STOPORDER_PREFIX):
+            self.cancel_stop_order( vt_orderid)
+        else:
+            self.cancel_limit_order(vt_orderid)
+
+    def cancel_stop_order(self, vt_orderid: str):
+        """"""
+        if vt_orderid not in self.active_stop_orders:
+            return
+        stop_order = self.active_stop_orders.pop(vt_orderid)
+
+        stop_order.status = StopOrderStatus.CANCELLED
+        self.strategy.on_stop_order(stop_order)
+
+    def cancel_limit_order(self, vt_orderid: str):
+        """"""
+        if vt_orderid not in self.active_limit_orders:
+            return
+        order = self.active_limit_orders.pop(vt_orderid)
+
+        order.status = Status.CANCELLED
+        self.strategy.on_order(order)
+
+    def cancel_all(self):
+        """
+        Cancel all orders, both limit and stop.
+        """
+        vt_orderids = list(self.active_limit_orders.keys())
+        for vt_orderid in vt_orderids:
+            self.cancel_limit_order(vt_orderid)
+
+        stop_orderids = list(self.active_stop_orders.keys())
+        for vt_orderid in stop_orderids:
+            self.cancel_stop_order(self.strategy, vt_orderid)
+
+    
+    def write_log(self, msg: str):
+        """
+        Write log message.
+        """
+        msg = f"{self.datetime}\t{msg}"
+        self.logs.append(msg)
+   
+    def send_email(self, msg: str):
+        """
+        Send email to default receiver.
+        """
+        pass
+
+    def sync_strategy_data(self):
+        """
+        Sync strategy data into json file.
+        """
+        pass
+
+    def get_engine_type(self):
+        """
+        Return engine type.
+        """
+        return self.engine_type
+
+    def put_strategy_event(self, strategy: CtaTemplate):
+        """
+        Put an event to update strategy status.
+        """
+        pass
+
+    def output(self, msg):
+        """
+        Output message of backtesting engine.
+        """
+        print(f"{datetime.now()}\t{msg}")
+
+    def get_all_trades(self):
+        """
+        Return all trade data of current backtesting result.
+        """
+        return list(self.trades.values())
+   
+    def get_all_orders(self):
+        """
+        Return all limit order data of current backtesting result.
+        """
+        return list(self.limit_orders.values())
+
+    def get_all_daily_results(self):
+        """
+        Return all daily result data.
+        """
+        return list(self.daily_results.values())
+

@@ -47,6 +47,8 @@ class MultiTimeframeStrategy(CtaTemplate):
         self.bg15 = BarGenerator(self.on_bar, 15, self.on_15min_bar)
         self.am15 = ArrayManager()
 
+
+
     def on_init(self):
         """
         Callback when strategy is inited.

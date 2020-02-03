@@ -90,7 +90,7 @@ class KingKeltnerStrategy(CtaTemplate):
             self.intra_trade_low = bar.low_price
             self.send_oco_order(self.kk_up, self.kk_down, self.fixed_size)
 
-        elif self.pos > 0:
+        elif self.pos > 0: 
             self.intra_trade_high = max(self.intra_trade_high, bar.high_price)
             self.intra_trade_low = bar.low_price
 

@@ -2,11 +2,13 @@ import os
 from wh_parser.whp.node import *
 from wh_parser.whp.error import CompileError
 import enum
-import typing
+from typing import List, Dict
+from .funcat import ExecutionContextStack
 
 class CodeFileType(enum.Enum):
-    PY = 'py'
-    Q = 'q'
+    PY = 'py' # python
+    LIB = 'lib' # 
+    ST = 'st'
 
 
 reserved = {
@@ -297,12 +299,14 @@ def setting_parser(sets: dict):
     return conditions_func
 
 
-def _get_origin_node(name, code, code_type=CodeFileType.Q):
-    if code_type == CodeFileType.Q:
+def _get_origin_node(name, code, code_type=CodeFileType.LIB):
+    if code_type == CodeFileType.LIB or code_type == CodeFileType.ST:
         global cur_indicator_name
         cur_indicator_name = name
         yacc.parse(code)
         global_indicators_dict[name] = IndicatorNode(name=name,
+                                                     ctx=global_ctx,
+                                                     api_env=global_api_env,
                                                      params=params_dict.copy(),
                                                      calls=calls_dict.copy(),
                                                      imports=import_dict.copy(),
@@ -313,12 +317,14 @@ def _get_origin_node(name, code, code_type=CodeFileType.Q):
                                                      )
         reset_indicator_var()
         return global_indicators_dict[name].compile()
-    else:
+    elif CodeFileType.PY:
         l_vars = {}
         exec(code, l_vars)
-        global_indicators_dict[name] = l_vars['get_indicator']()
+        global_indicators_dict[name] = l_vars['get_indicator'](global_ctx)
         reset_indicator_var()
         return global_indicators_dict[name].compile()
+    else:
+        raise NotImplementedError("不支持的文件类型")
 
 
 def _parse4single(path: str):
@@ -328,24 +334,40 @@ def _parse4single(path: str):
     :return:
     """
     name, ext = os.path.splitext(os.path.split(path)[1])
-    if ext == '.q':
+    body = ''
+    file_type = CodeFileType.LIB
+    if ext == '.lib':
         with open(path, 'r') as f:
-            return _get_origin_node(name, f.read())
+            body = f.read()
+            file_type = CodeFileType.LIB
+    elif  ext = '.st':
+        with open(path, 'r') as f:
+            body = f.read()
+        file_type = CodeFileType.ST
+
     elif ext == '.py':
         with open(path, 'r') as f:
-            return _get_origin_node(name, f.read(), CodeFileType.PY)
+            body = f.read()
+        file_type = CodeFileType.PY
+    else:
+        NotImplementedError("不支持的文件类型")
+    return _get_origin_node(name, f.read(), file_type)
 
-
-def parse(paths):
+def parse(ctx:ExecutionContextStack,  api_env ,mpath, lib_paths):
     """
     编译代码文件列表
     :param paths:
     :return:
     """
-    res = list()
-    for path in paths:
-        res.append(_parse4single(path))
+    global_api_env = api_env
+    global_ctx = ctx
+
+    for path in lib_paths:
+        _parse4single(path)
+    main_node = _parse4single(mpath)
     global_indicators_dict.clear()
     settings.clear()
     conditions.clear()
-    return res
+    global_ctx = None
+    global_ctx = None
+    return main_node

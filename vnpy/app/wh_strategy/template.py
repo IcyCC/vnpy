@@ -9,7 +9,6 @@ from vnpy.trader.utility import virtual, BarGenerator
 from vnpy.app.cta_strategy.base import StopOrder, EngineType
 
 
-from .wh_parser import funcat
 from .base import WhBarTriggerMode
 
 def Singals2PosAlgoTemplate(ABC):
@@ -51,7 +50,7 @@ class MultiSingalStrategyTamplate(ABC):
         self.strategy_name = strategy_name
         self.inited = False
         self.trading = False
-        self.pos = 0
+        self.poses =  {vt_symbol:0 for vt_symbol in vt_symbols}
         self.sigal2pos_algo = sigal2pos_algo
         self.bar_trigger_model = bar_trigger_model
 

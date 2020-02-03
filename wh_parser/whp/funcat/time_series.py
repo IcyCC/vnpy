@@ -7,15 +7,15 @@ import six
 import numpy as np
 
 from .utils import wrap_formula_exc, FormulaException, parser_str_to_time
-from .context import ExecutionContext
+from .context import ExecutionContextStack
 
 
-def get_bars():
-    freq = ExecutionContext.get_current_freq()
-    data_backend = ExecutionContext.get_data_backend()
-    current_date = ExecutionContext.get_current_date()
-    order_book_id = ExecutionContext.get_current_security()
-    start_date = ExecutionContext.get_start_date()
+def get_bars(ctx:ExecutionContextStack):
+    freq = ctx.get_current_freq()
+    data_backend = ctx.get_data_backend()
+    current_date = ctx.get_current_date()
+    order_book_id = ctx.get_current_security()
+    start_date = ctx.get_start_date()
 
     try:
         bars = data_backend.get_price(order_book_id, start=start_date, end=current_date, freq=freq)
@@ -237,13 +237,14 @@ class MarketDataSeries(NumericSeries):
     MarketDataSeries 与其他 TimeSeries 最大的区别是，
     其值是通过动态根据当前时间和当前关注的标的更新
     """
-    def __init__(self, series=None, dynamic_update=False):
+    def __init__(self, ctx:ExecutionContextStack, series=None, dynamic_update=False):
         super(MarketDataSeries, self).__init__(series)
         self._dynamic_update = dynamic_update
+        self._ctx = ctx
         self._ensure_series_update()
 
     def _ensure_series_update(self):
-        bars = get_bars()
+        bars = get_bars(self._ctx)
         if len(bars) > 0:
             self._series = bars[self.name].astype(self.dtype)
         else:

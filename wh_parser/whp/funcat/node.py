@@ -1,7 +1,7 @@
 import abc
 from wh_parser import funcat
 from collections import defaultdict
-
+from .time_series import TimeSeries
 
 class BaseNode(metaclass=abc.ABCMeta):
     """
@@ -22,7 +22,7 @@ class BaseDataNode(BaseNode):
     类似Open Close等基本值
     """
 
-    def __init__(self, value):
+    def __init__(self, value:TimeSeries):
         self.value = value
 
     def compute(self, pvars=None):
@@ -121,15 +121,16 @@ class FuncNode(BaseNode):
     函数node
     """
 
-    def __init__(self, name, *args):
+    def __init__(self, func, name, *args, **kwargs):
         self.name = name
         self.args = args
+        self.func = func
 
     def compute(self, pvars=None):
         if pvars is None:
             pvars = {}
         value = list([v.compute(pvars) for v in self.args])
-        return getattr(funcat, self.name)(*value)
+        return self.func(*self.args,**kwargs)
 
     def output(self):
         return '{name}({args})'.format(name=self.name, args=[i.output() for i in self.args])
@@ -181,7 +182,7 @@ class Indicator(object):
     指标基类 作用是传入一组维度 compute返回值
     """
 
-    def __init__(self, name, alias, diff=None, deps=None, var_nodes=None, params=None, cond_func=None, set_func=None):
+    def __init__(self, name, ctx, api_env, alias, diff=None, deps=None, var_nodes=None, params=None, cond_func=None, set_func=None):
         if var_nodes is None:
             var_nodes = []
         if diff is None:
@@ -199,6 +200,8 @@ class Indicator(object):
         self.deps = deps
         self.params = params
         self.lvars = defaultdict(dict)
+        self.ctx = ctx
+        self.api_env = api_env
 
         if cond_func is None:
             cond_func = lambda v: True
@@ -245,7 +248,7 @@ class Indicator(object):
         self.lvars = pvars[self.alias]
 
         self.update_params(self.lvars)
-        with funcat.ExecutionContext.get_active().diff(diff=self.diff):
+        with self.ctx.get_active().diff(diff=self.diff):
             for dep_name, dep in self.deps.items():
                 dep.compute(self.lvars)
 

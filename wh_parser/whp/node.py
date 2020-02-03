@@ -1,4 +1,4 @@
-from wh_parser.funcat.node import *
+from .funcat.node import *
 import copy
 import abc
 
@@ -11,6 +11,9 @@ vars_dict = {}
 cur_indicator_name = ''
 settings = {}
 conditions = []
+
+global_api_env = None
+global_ctx = None
 
 # 全局指标
 global_indicators_dict = {}
@@ -67,7 +70,7 @@ class Node(metaclass=abc.ABCMeta):
 
 
 class IndicatorNode(Node):
-    def __init__(self, name, params, calls, imports, withs, vars, cond_func, set_func):
+    def __init__(self,ctx, api_env , name, params, calls, imports, withs, vars, cond_func, set_func):
         """
 
         :param name: 指标名称
@@ -87,6 +90,8 @@ class IndicatorNode(Node):
         self.withs = withs
         self.vars = vars
         self.diff = {}
+        self.ctx = ctx
+        self.api_env = api_env
 
         self.deps = {}
         for as_id, (code, name) in self.calls.items():
@@ -114,6 +119,8 @@ class IndicatorNode(Node):
     def compile(self):
         return Indicator(
             name=self.name,
+            ctx=self.ctx,
+            api_env=self.api_env,
             var_nodes=[VarNode(name, {"load": "line"}, val.compile()) for name, val in self.vars.items()],
             deps={name: val.compile() for name, val in self.deps.items()},
             params={name: {"range": val} for name, val in self.params.items()},
@@ -179,7 +186,7 @@ class TradeIdentifierEXPR(Node):
         self.args = args
 
     def compile(self):
-        return FuncNode(self.name, *self.args)
+        return FuncNode(global_api_env.func(self.name), *self.args)
 
 
 class FutureExpr(Node):
@@ -199,4 +206,4 @@ class MethodCallEXPR(Node):
 
     def compile(self):
         args = [arg.compile() for arg in self.args]
-        return FuncNode(self.name, *args)
+        return FuncNode(global_api_env.func(self.name), *args)

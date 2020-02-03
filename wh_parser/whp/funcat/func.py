@@ -14,7 +14,6 @@ from .time_series import (
     BoolSeries,
     fit_series,
     get_series,
-    get_bars,
     ensure_timeseries,
 )
 

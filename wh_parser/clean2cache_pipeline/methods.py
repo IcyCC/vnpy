@@ -1,5 +1,5 @@
 import pandas as pd
-from wh_parser.util import convert_freq_to_pd
+from vnpy.app.wh_strategy.wh_parser.util import convert_freq_to_pd
 
 methods_map = {}
 
